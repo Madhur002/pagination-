@@ -1,0 +1,361 @@
+import { ArrowOutward, Search, Visibility } from "@mui/icons-material";
+import { Box, InputAdornment, TextField, Typography, useTheme } from "@mui/material";
+import CustomIconButton from "layouts/resuableComponents/CustomIconButton";
+import EmptyStateBox from "layouts/resuableComponents/emptyStateBox";
+import PaginationFooter from "layouts/resuableComponents/PaginationFooter";
+import {
+  iconButtonStyle,
+  topBarSearchStyle2,
+  topBarStyle,
+} from "layouts/resuableComponents/styles";
+import debounce from "lodash.debounce";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { BsTable } from "react-icons/bs";
+import { 
+  latestObligationInitialFIelds, 
+  latestObligationInitialFIeldsWidths,
+  getFieldNames,
+  getFieldWidths 
+} from "../obligation";
+
+const InitialData = ({
+  setCircularSelected,
+  setCircularData,
+  obligation,
+  user,
+  userRole,
+  displayName,
+  obligationType,
+}) => {
+  const [searchTerm, setSearchTerm] = useState("");
+  const theme = useTheme();
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  // Get parent obligations (first obligation in each group)
+  const uniqueCircularReferences = useMemo(() => {
+    // Group obligations by their prefix (first part of ID)
+    const groupedObligations = new Map();
+    
+    obligation.forEach((item) => {
+      const parts = item.id.split(".");
+      if (parts.length < 2) return; // Skip invalid IDs
+      
+      const prefix = parts[0]; // Get the first part (e.g., "1" from "1.2")
+      const suffix = parseInt(parts[1], 10); // Get the second part as number (e.g., 2 from "1.2")
+      
+      // Skip if suffix is not a valid number
+      if (isNaN(suffix)) return;
+      
+      if (!groupedObligations.has(prefix)) {
+        groupedObligations.set(prefix, []);
+      }
+      
+      groupedObligations.get(prefix).push({
+        ...item,
+        suffix: suffix
+      });
+    });
+    
+    // For each group, find the parent (smallest suffix) and count total obligations
+    const parentObligations = [];
+    
+    groupedObligations.forEach((group, prefix) => {
+      // Sort by suffix to find the smallest one (parent)
+      // This handles any range: 1.1, 1.15, 1.23, etc.
+      group.sort((a, b) => a.suffix - b.suffix);
+      
+      const parentObligation = group[0]; // First item after sorting is the parent
+      
+      parentObligations.push({
+        ...parentObligation,
+        totalObligations: group.length // Count of all obligations in this group
+      });
+    });
+    
+    // Sort parent obligations by their ID for consistent display
+    return parentObligations.sort((a, b) => {
+      const aParts = a.id.split(".");
+      const bParts = b.id.split(".");
+      const aPrefix = parseInt(aParts[0], 10);
+      const bPrefix = parseInt(bParts[0], 10);
+      
+      if (aPrefix === bPrefix) {
+        return parseInt(aParts[1], 10) - parseInt(bParts[1], 10);
+      }
+      return aPrefix - bPrefix;
+    });
+  }, [obligation]);
+
+  const [filteredData, setFilteredData] = useState(uniqueCircularReferences);
+
+  // Update filtered data when uniqueCircularReferences changes
+  useEffect(() => {
+    setFilteredData(uniqueCircularReferences);
+    // Reset to first page when data changes
+    setCurrentPage(1);
+  }, [uniqueCircularReferences]);
+
+  // Calculate pagination values based on filtered data
+  const totalRecords = useMemo(() => filteredData.length, [filteredData]);
+  const totalPages = useMemo(() => Math.ceil(totalRecords / rowsPerPage), [totalRecords, rowsPerPage]);
+
+  // Get paginated data
+  const paginatedData = useMemo(() => {
+    const startIndex = (currentPage - 1) * rowsPerPage;
+    const endIndex = startIndex + rowsPerPage;
+    return filteredData.slice(startIndex, endIndex);
+  }, [filteredData, currentPage, rowsPerPage]);
+
+  // Handle page change
+  const handlePageChange = useCallback((event, newPage) => {
+    setCurrentPage(newPage);
+  }, []);
+
+  // Handle rows per page change
+  const handleRowsPerPageChange = useCallback((event) => {
+    const { numericValue, resetToFirstPage } = event;
+    
+    setRowsPerPage(numericValue);
+    if (resetToFirstPage) {
+      setCurrentPage(1); // Reset to first page when changing page size
+    }
+  }, []);
+
+  // Debounced search function
+  const debouncedSearch = useMemo(
+    () =>
+      debounce((query) => {
+        const lowerQuery = query.toLowerCase();
+        const result = uniqueCircularReferences.filter((item) =>
+          ["id", "product", "circularReference", "title", "year", "regulator"].some((key) =>
+            item[key]?.toString().toLowerCase().includes(lowerQuery)
+          )
+        );
+        setFilteredData(result);
+        setCurrentPage(1); // Reset to first page after search
+      }, 300),
+    [uniqueCircularReferences]
+  );
+
+  // Handle input change
+  const handleSearch = (e) => {
+    const value = e.target.value;
+    setSearchTerm(value);
+    if (value.trim() === "") {
+      setFilteredData(uniqueCircularReferences);
+      setCurrentPage(1);
+    } else {
+      debouncedSearch(value);
+    }
+  };
+
+  const handleViewMore = (circularReference) => {
+    console.log('Viewing circular:', circularReference);
+    setCircularData(circularReference);
+    setCircularSelected(true);
+  };
+
+  // Cleanup debounce on unmount
+  useEffect(() => {
+    return () => {
+      debouncedSearch.cancel();
+    };
+  }, [debouncedSearch]);
+
+  console.log('=== INITIAL DATA DEBUG ===');
+  console.log('All obligations:', obligation.length);
+  console.log('Unique circular references:', uniqueCircularReferences.length);
+  console.log('Filtered data:', filteredData.length);
+  console.log('Paginated data:', paginatedData.length);
+  console.log('Current page:', currentPage);
+  console.log('Total pages:', totalPages);
+  console.log('User role:', userRole);
+
+  return (
+    <React.Fragment>
+      <Box
+        sx={{
+          width: "100%",
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          gap: "8px",
+          position: "relative",
+        }}
+      >
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "10px",
+          }}
+        >
+          <Box sx={topBarStyle}>
+            <Typography
+              variant="caption"
+              sx={{ color: theme.palette.custom.text2, ml: 1, textTransform: "capitalize" }}
+            >
+              <strong>{displayName}</strong> - {obligationType} Obligations ({totalRecords} circulars)
+            </Typography>
+
+            <Box sx={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <TextField
+                fullWidth
+                placeholder="Search Circular Records..."
+                variant="outlined"
+                sx={topBarSearchStyle2}
+                value={searchTerm}
+                onChange={handleSearch}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <Search fontSize="medium" sx={iconButtonStyle} />
+                    </InputAdornment>
+                  ),
+                }}
+              />
+            </Box>
+          </Box>
+        </Box>
+        <Box
+          sx={{
+            position: "relative",
+            display: "flex",
+            width: "100%",
+            height: "calc(100vh - 120px)", // Reduced height to accommodate pagination
+            m: 0,
+          }}
+        >
+          <div id="table-obligation" className="table-container">
+            {paginatedData.length > 0 ? (
+              <table className="table">
+                <thead
+                  style={{
+                    backgroundColor: theme.palette.custom.background1,
+                    color: theme.palette.custom.text2,
+                  }}
+                >
+                  <tr>
+                    {latestObligationInitialFIelds.map((title) => (
+                      <th
+                        key={title}
+                        style={{
+                          width: latestObligationInitialFIeldsWidths[title],
+                          backgroundColor: theme.palette.custom.background1,
+                          minWidth: latestObligationInitialFIeldsWidths[title]
+                            .replace("!important", "")
+                            .trim(),
+                        }}
+                      >
+                        {title
+                          .replace(/([A-Z])/g, " $1")
+                          .trim()
+                          .replace(/^./, (char) => char.toUpperCase())}
+                      </th>
+                    ))}
+                    <th
+                      style={{
+                        width: "100px",
+                        minWidth: "100px",
+                        textAlign: "center",
+                        backgroundColor: theme.palette.custom.background1,
+                      }}
+                    >
+                      Total
+                    </th>
+                    <th
+                      style={{
+                        width: "180px",
+                        minWidth: "180px",
+                        textAlign: "center",
+                        backgroundColor: theme.palette.custom.background1,
+                      }}
+                    >
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginatedData.map((row, index) => {
+                    return (
+                      <tr key={index} style={{ backgroundColor: "transparent" }}>
+                        {latestObligationInitialFIelds.map((field) => {
+                          const cellStyle = {
+                            width: latestObligationInitialFIeldsWidths[field],
+                            minWidth: latestObligationInitialFIeldsWidths[field]
+                              .replace("!important", "")
+                              .trim(),
+                          };
+                          return (
+                            <td key={field} style={cellStyle}>
+                              <Box sx={{ color: (theme) => theme.palette.custom.text2 }}>
+                                {row[field] || ""}
+                              </Box>
+                            </td>
+                          );
+                        })}
+                        <td style={{ textAlign: "center", width: "100px", minWidth: "100px" }}>
+                          <Box sx={{ 
+                            color: theme.palette.custom.text2, 
+                            fontWeight: 'bold',
+                            backgroundColor: theme.palette.custom.background1,
+                            borderRadius: 10,
+                            padding: '4px 10px',
+                            display: 'inline-block'
+                          }}>
+                            {row.totalObligations}
+                          </Box>
+                        </td>
+                        <td style={{ textAlign: "center", width: "180px", minWidth: "180px" }}>
+                          <Box
+                            sx={{
+                              display: "flex",
+                              width: "100%",
+                              justifyContent: "center",
+                              alignItems: "center",
+                              gap: 1,
+                            }}
+                          >
+                            <CustomIconButton
+                              icon={ArrowOutward}
+                              label="View Details"
+                              disabled={false}
+                              onClick={() => handleViewMore(row.circularReference)}
+                            />
+                          </Box>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <EmptyStateBox
+                icon={BsTable}
+                title="Currently there are no Latest circulars"
+                description={searchTerm ? "No circulars match your search criteria" : "Fetch the latest circulars or contact Admin"}
+              />
+            )}
+        {/* Pagination Footer */}
+        <PaginationFooter
+          currentPage={currentPage}
+          rowsPerPage={rowsPerPage}
+          totalPages={totalPages}
+          totalRecords={totalRecords}
+          onPageChange={handlePageChange}
+          onRowsPerPageChange={handleRowsPerPageChange}
+          loading={false}
+        />
+          </div>
+        </Box>
+        
+      </Box>
+    </React.Fragment>
+  );
+};
+
+export default InitialData;
